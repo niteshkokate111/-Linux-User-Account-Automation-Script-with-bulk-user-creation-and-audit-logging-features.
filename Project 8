@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# Check for root privileges
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 
+   exit 1
+fi
+
+# Log file for audit
+LOG_FILE="/var/log/user_management.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+touch "$LOG_FILE"
+
+log_action() {
+    local action=$1
+    local username=$2
+    echo "$(date '+%Y-%m-%d %H:%M:%S') | $action | $username" >> "$LOG_FILE"
+}
+
+# Function to create a single user
+create_user() {
+    local username=$1
+    local password=$2
+    local group=$3
+
+    # Check if user already exists
+    if id "$username" &>/dev/null; then
+        echo "User $username already exists."
+        log_action "CREATE_FAILED" "$username"
+        return
+    fi
+
+    # Create user
+    useradd -m -G "$group" -s /bin/bash "$username"
+    echo "$username:$password" | chpasswd
+    echo "User $username created and added to group $group."
+    log_action "CREATE_SUCCESS" "$username"
+}
+
+# Function to delete a user
+delete_user() {
+    local username=$1
+
+    # Check if user exists
+    if ! id "$username" &>/dev/null; then
+        echo "User $username does not exist."
+        log_action "DELETE_FAILED" "$username"
+        return
+    fi
+
+    # Delete user and their home directory
+    userdel -r "$username"
+    echo "User $username deleted."
+    log_action "DELETE_SUCCESS" "$username"
+}
+
+# Function to disable a user
+disable_user() {
+    local username=$1
+
+    # Check if user exists
+    if ! id "$username" &>/dev/null; then
+        echo "User $username does not exist."
+        log_action "DISABLE_FAILED" "$username"
+        return
+    fi
+
+    # Disable user
+    usermod -L "$username"
+    echo "User $username has been disabled."
+    log_action "DISABLE_SUCCESS" "$username"
+}
+
+# Function to create users in bulk from a CSV file
+bulk_create_users() {
+    local csv_file=$1
+
+    if [[ ! -f "$csv_file" ]]; then
+        echo "CSV file not found: $csv_file"
+        return
+    fi
+
+    while IFS=, read -r username password group; do
+        if [[ "$username" == "Username" ]]; then
+            # Skip header row if present
+            continue
+        fi
+        create_user "$username" "$password" "$group"
+    done < "$csv_file"
+}
+
+# Menu options
+echo "Choose an option:"
+echo "1. Create a single user"
+echo "2. Delete a user"
+echo "3. Disable a user"
+echo "4. Bulk create users from CSV"
+echo "5. View audit log"
+read -p "Enter your choice: " choice
+
+case $choice in
+    1)
+        read -p "Enter username: " username
+        read -p "Enter password: " password
+        read -p "Enter group: " group
+        create_user "$username" "$password" "$group"
+        ;;
+    2)
+        read -p "Enter username to delete: " username
+        delete_user "$username"
+        ;;
+    3)
+        read -p "Enter username to disable: " username
+        disable_user "$username"
+        ;;
+    4)
+        read -p "Enter the path to the CSV file: " csv_file
+        bulk_create_users "$csv_file"
+        ;;
+    5)
+        echo "Audit Log:"
+        cat "$LOG_FILE"
+        ;;
+    *)
+        echo "Invalid choice."
+        ;;
+esac
+Username,Password,Group
+alice,Alice123!,developers
+bob,Bob123!,admins
+charlie,Charlie123!,developers
+ Linux User Account Automation Script with bulk user creation and audit logging features.2024-12-10 14:35:12 | CREATE_SUCCESS | alice
+2024-12-10 14:35:13 | CREATE_SUCCESS | bob
+2024-12-10 14:35:14 | DELETE_SUCCESS | charlie
+2024-12-10 14:35:15 | DISABLE_SUCCESS | alice
+2024-12-10 14:35:16 | CREATE_FAILED | bob
